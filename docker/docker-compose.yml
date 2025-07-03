@@ -1,3 +1,4 @@
+version: '3.8'
 services:
   postgresql:
     container_name: postgresql_container
@@ -9,11 +10,14 @@ services:
     volumes:
       - challenge_postgresql_data:/bitnami/postgresql
       - ./init-scripts:/docker-entrypoint-initdb.d
+    env_file:
+      - .env
     environment:
-      - POSTGRESQL_USERNAME={CHANGE_ME}
-      - POSTGRESQL_PASSWORD={CHANGE_ME}
-      - POSTGRESQL_DATABASE=challenge
-      - POSTGRESQL_POSTGRES_PASSWORD={CHANGE_ME} # Password of user "postgres"
+      - POSTGRES_USER=$DB_USER
+      - POSTGRES_PASSWORD=$DB_PASS
+      - POSTGRES_DB=$DB_NAME
+      - POSTGRESQL_POSTGRES_PASSWORD=$DB_PASS # Password of user "postgres"
+      - ALLOW_EMPTY_PASSWORD=no
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -21,21 +25,47 @@ services:
     ports:
       - "9000:9000"  # API S3
       - "9001:9001"  # MinIO Web Console
+    env_file:
+      - .env
     environment:
-      MINIO_ROOT_USER: {CHANGE_ME}
-      MINIO_ROOT_PASSWORD: {CHANGE_ME}
+      MINIO_ROOT_USER: $MINIO_ROOT_USER
+      MINIO_ROOT_PASSWORD: $MINIO_ROOT_PASSWORD
     command: server --console-address ":9001" /data
     volumes:
       - challenge_minio_data:/data
   # Include all the necessary settings to include a document management service in the stack
   # Remember to configure this service to limit the memory to 50MB
-  # document-management-service:
-  #    environment:
-  #      - JAVA_OPTS=-Xmx50m -Xms50m
-  #    deploy:
-  #      resources:
-  #        limits:
-  #          memory: 50M
+  document-service:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: dms-service
+    env_file:
+      - .env
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - DB_HOST=$DB_HOST
+      - DB_PORT=5432
+      - DB_NAME=$DB_NAME
+      - DB_USER=$DB_USER
+      - DB_PASS=$DB_PASS
+      - MINIO_HOST=$MINIO_HOST
+      - MINIO_PORT=$MINIO_PORT
+      - MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
+      - MINIO_SECRET_KEY=$MINIO_SECRET_KEY
+      - MINIO_BUCKET=$MINIO_BUCKET
+      - JAVA_OPTS=$JAVA_OPTS
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 200M
+    networks:
+      - batch_network
+    depends_on:
+      - postgresql
+      - minio
 
 volumes:
   challenge_postgresql_data:
