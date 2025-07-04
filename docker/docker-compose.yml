@@ -33,6 +33,8 @@ services:
     command: server --console-address ":9001" /data
     volumes:
       - challenge_minio_data:/data
+    networks:
+      - batch_network
   # Include all the necessary settings to include a document management service in the stack
   # Remember to configure this service to limit the memory to 50MB
   document-service:
