@@ -1,24 +1,39 @@
 package com.clara.ops.challenge.document_management_service_challenge.controller;
 
 import com.clara.ops.challenge.document_management_service_challenge.domain.Document;
+import com.clara.ops.challenge.document_management_service_challenge.domain.Tag;
 import com.clara.ops.challenge.document_management_service_challenge.dto.exception.ErrorResponse;
 import com.clara.ops.challenge.document_management_service_challenge.dto.request.UploadDocumentRequest;
+import com.clara.ops.challenge.document_management_service_challenge.dto.response.DocumentResponse;
+import com.clara.ops.challenge.document_management_service_challenge.dto.response.PaginatedDocumentSearch;
 import com.clara.ops.challenge.document_management_service_challenge.service.DocumentService;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Slf4j
 @RestController
 @RequestMapping("/document-management")
-@Tag(name = "Document Management", description = "Endpoints para gestión de documentos PDF")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Document Management", description = "Endpoints para gestión de documentos PDF")
 @Validated
 public class DocumentController {
   private final DocumentService documentService;
@@ -66,4 +81,74 @@ public class DocumentController {
     );
     return new ResponseEntity<>(doc, HttpStatus.CREATED);
   }
+
+    @Operation(
+            summary = "Search documents with optional filters",
+            description = "Allows querying documents by user, document name, and tags with pagination, sorted by createdAt descending. Does not return download URLs.",
+            parameters = {
+                    @Parameter(name = "userName", in = ParameterIn.QUERY,
+                            description = "Filter by user", schema = @Schema(type = "string")),
+                    @Parameter(name = "documentName", in = ParameterIn.QUERY,
+                            description = "Filter by document name", schema = @Schema(type = "string")),
+                    @Parameter(name = "tags", in = ParameterIn.QUERY,
+                            description = "Filter by list of tags",
+                            schema = @Schema(type = "array", implementation = String.class)),
+                    @Parameter(name = "page", in = ParameterIn.QUERY,
+                            description = "Zero-based page index",
+                            schema = @Schema(type = "integer", defaultValue = "0")),
+                    @Parameter(name = "size", in = ParameterIn.QUERY,
+                            description = "Page size",
+                            schema = @Schema(type = "integer", defaultValue = "20")),
+                    @Parameter(name = "sort", in = ParameterIn.QUERY,
+                            description = "Sort criteria in the format property,asc|desc",
+                            schema = @Schema(type = "string", defaultValue = "createdAt,desc"))
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Search results returned",
+                            content = @Content(mediaType = "application/json",
+                                    schema = @Schema(implementation = PaginatedDocumentSearch.class))),
+                    @ApiResponse(responseCode = "400", description = "Invalid search parameters",
+                            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+                    @ApiResponse(responseCode = "500", description = "Internal server error",
+                            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+            }
+    )
+    @GetMapping("/search")
+    public ResponseEntity<Page<DocumentResponse>> searchDocuments(
+            @RequestParam(required = false) String userName,
+            @RequestParam(required = false) String documentName,
+            @RequestParam(required = false) List<String> tags,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt,desc") String sort
+    ) {
+        String[] parts = sort.split(",");
+        Sort.Direction dir = parts.length>1 && parts[1].equalsIgnoreCase("asc")
+                ? Sort.Direction.ASC : Sort.Direction.DESC;
+        Sort s = Sort.by(dir, parts[0]);
+        Pageable pr = PageRequest.of(page, size, s);
+
+        Page<Document> result = documentService.searchDocuments(
+                userName, documentName, tags, pr
+        );
+
+        log.info("Result", result);
+        Page<DocumentResponse> dtoPage = result.map(doc -> {
+            Set<Tag> safeTags = new HashSet<>(doc.getTags());
+            List<String> tagNames = safeTags.stream()
+                    .map(Tag::getName)
+                    .collect(Collectors.toList());
+            return new DocumentResponse(
+                    doc.getId(),
+                    doc.getUserName(),
+                    doc.getDocumentName(),
+                    tagNames,
+                    doc.getFileSize(),
+                    doc.getFileType(),
+                    doc.getCreatedAt()
+            );
+        });
+
+        return ResponseEntity.ok(dtoPage);
+    }
 }

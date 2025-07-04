@@ -5,6 +5,7 @@ import com.clara.ops.challenge.document_management_service_challenge.domain.Tag;
 import com.clara.ops.challenge.document_management_service_challenge.exception.DuplicateDocumentException;
 import com.clara.ops.challenge.document_management_service_challenge.repository.DocumentRepository;
 import com.clara.ops.challenge.document_management_service_challenge.repository.TagRepository;
+import com.clara.ops.challenge.document_management_service_challenge.repository.spec.DocumentSpecification;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import java.io.InputStream;
@@ -16,6 +17,11 @@ import java.util.stream.Stream;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -97,6 +103,37 @@ public class DocumentServiceImpl implements DocumentService {
     // Update path and return
     doc.setMinioPath(objectName);
     return documentRepository.save(doc);
+  }
+
+  @Override
+  public Page searchDocuments(
+          String userName,
+          String documentName,
+          List<String> tags,
+          Pageable pageable) {
+
+    Specification<Document> spec = Specification
+            .where(DocumentSpecification.byUserName(userName))
+            .and(DocumentSpecification.byDocumentName(documentName))
+            .and(DocumentSpecification.byTags(tags));
+
+    return documentRepository.findAll(spec,
+            PageRequest.of(
+                    pageable.getPageNumber(),
+                    pageable.getPageSize(),
+                    Sort.by("createdAt").descending()
+            )
+    );
+  }
+
+  @Override
+  public List<Document> listDocuments(String userName) {
+    return List.of();
+  }
+
+  @Override
+  public String downloadDocument(UUID documentId) {
+    return "";
   }
 
   private String calculateChecksum(MultipartFile file) {
