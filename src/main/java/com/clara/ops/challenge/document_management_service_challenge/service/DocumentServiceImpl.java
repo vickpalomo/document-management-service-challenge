@@ -6,15 +6,23 @@ import com.clara.ops.challenge.document_management_service_challenge.exception.D
 import com.clara.ops.challenge.document_management_service_challenge.repository.DocumentRepository;
 import com.clara.ops.challenge.document_management_service_challenge.repository.TagRepository;
 import com.clara.ops.challenge.document_management_service_challenge.repository.spec.DocumentSpecification;
+import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+
+import java.io.IOException;
 import java.io.InputStream;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.minio.errors.*;
+import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
@@ -106,7 +114,7 @@ public class DocumentServiceImpl implements DocumentService {
   }
 
   @Override
-  public Page searchDocuments(
+  public Page<Document> searchDocuments(
           String userName,
           String documentName,
           List<String> tags,
@@ -117,23 +125,34 @@ public class DocumentServiceImpl implements DocumentService {
             .and(DocumentSpecification.byDocumentName(documentName))
             .and(DocumentSpecification.byTags(tags));
 
-    return documentRepository.findAll(spec,
-            PageRequest.of(
-                    pageable.getPageNumber(),
-                    pageable.getPageSize(),
-                    Sort.by("createdAt").descending()
-            )
-    );
+    return documentRepository.findAll(spec, pageable);
   }
 
   @Override
   public List<Document> listDocuments(String userName) {
-    return List.of();
+    return documentRepository.findByUserNameOrderByCreatedAtDesc(userName);
   }
 
   @Override
   public String downloadDocument(UUID documentId) {
-    return "";
+    Document doc = documentRepository.findById(documentId)
+            .orElseThrow(() -> new RuntimeException("Document not found: " + documentId));
+      String presignedObjectUrl = null;
+      try {
+          presignedObjectUrl = minioClient.getPresignedObjectUrl(
+                  GetPresignedObjectUrlArgs.builder()
+                          .method(Method.GET)
+                          .bucket(bucket)
+                          .object(doc.getMinioPath())
+                          .expiry((int) Duration.ofMinutes(15).getSeconds())
+                          .build()
+          );
+      } catch (RuntimeException | ErrorResponseException | InsufficientDataException | InternalException |
+               InvalidKeyException | InvalidResponseException | IOException | NoSuchAlgorithmException |
+               XmlParserException | ServerException e) {
+          throw new RuntimeException(e);
+      }
+      return presignedObjectUrl;
   }
 
   private String calculateChecksum(MultipartFile file) {

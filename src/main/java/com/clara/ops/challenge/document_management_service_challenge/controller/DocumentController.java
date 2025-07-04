@@ -4,6 +4,7 @@ import com.clara.ops.challenge.document_management_service_challenge.domain.Docu
 import com.clara.ops.challenge.document_management_service_challenge.domain.Tag;
 import com.clara.ops.challenge.document_management_service_challenge.dto.exception.ErrorResponse;
 import com.clara.ops.challenge.document_management_service_challenge.dto.request.UploadDocumentRequest;
+import com.clara.ops.challenge.document_management_service_challenge.dto.response.DocumentDownloadDto;
 import com.clara.ops.challenge.document_management_service_challenge.dto.response.DocumentResponse;
 import com.clara.ops.challenge.document_management_service_challenge.dto.response.PaginatedDocumentSearch;
 import com.clara.ops.challenge.document_management_service_challenge.service.DocumentService;
@@ -28,6 +29,7 @@ import org.springframework.data.domain.Sort;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -84,37 +86,25 @@ public class DocumentController {
 
     @Operation(
             summary = "Search documents with optional filters",
-            description = "Allows querying documents by user, document name, and tags with pagination, sorted by createdAt descending. Does not return download URLs.",
             parameters = {
-                    @Parameter(name = "userName", in = ParameterIn.QUERY,
-                            description = "Filter by user", schema = @Schema(type = "string")),
-                    @Parameter(name = "documentName", in = ParameterIn.QUERY,
-                            description = "Filter by document name", schema = @Schema(type = "string")),
-                    @Parameter(name = "tags", in = ParameterIn.QUERY,
-                            description = "Filter by list of tags",
-                            schema = @Schema(type = "array", implementation = String.class)),
-                    @Parameter(name = "page", in = ParameterIn.QUERY,
-                            description = "Zero-based page index",
-                            schema = @Schema(type = "integer", defaultValue = "0")),
-                    @Parameter(name = "size", in = ParameterIn.QUERY,
-                            description = "Page size",
-                            schema = @Schema(type = "integer", defaultValue = "20")),
-                    @Parameter(name = "sort", in = ParameterIn.QUERY,
-                            description = "Sort criteria in the format property,asc|desc",
-                            schema = @Schema(type = "string", defaultValue = "createdAt,desc"))
+                    @Parameter(name = "userName", in = ParameterIn.QUERY, description = "Filter by user", schema = @Schema(type = "string")),
+                    @Parameter(name = "documentName", in = ParameterIn.QUERY, description = "Filter by document name", schema = @Schema(type = "string")),
+                    @Parameter(name = "tags", in = ParameterIn.QUERY, description = "Filter by tags", schema = @Schema(type = "array", implementation = String.class)),
+                    @Parameter(name = "page", in = ParameterIn.QUERY, description = "Zero-based page index", schema = @Schema(type = "integer", defaultValue = "0")),
+                    @Parameter(name = "size", in = ParameterIn.QUERY, description = "Page size", schema = @Schema(type = "integer", defaultValue = "20")),
+                    @Parameter(name = "sort", in = ParameterIn.QUERY, description = "Sort criteria property,asc|desc", schema = @Schema(type = "string", defaultValue = "createdAt,desc"))
             },
             responses = {
                     @ApiResponse(responseCode = "200", description = "Search results returned",
-                            content = @Content(mediaType = "application/json",
-                                    schema = @Schema(implementation = PaginatedDocumentSearch.class))),
-                    @ApiResponse(responseCode = "400", description = "Invalid search parameters",
-                            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-                    @ApiResponse(responseCode = "500", description = "Internal server error",
-                            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = PaginatedDocumentSearch.class))),
+                    @ApiResponse(responseCode = "400", description = "Invalid parameters",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class))),
+                    @ApiResponse(responseCode = "500", description = "Internal Server Error",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
             }
     )
     @GetMapping("/search")
-    public ResponseEntity<Page<DocumentResponse>> searchDocuments(
+    public ResponseEntity<PaginatedDocumentSearch> searchDocuments(
             @RequestParam(required = false) String userName,
             @RequestParam(required = false) String documentName,
             @RequestParam(required = false) List<String> tags,
@@ -123,32 +113,53 @@ public class DocumentController {
             @RequestParam(defaultValue = "createdAt,desc") String sort
     ) {
         String[] parts = sort.split(",");
-        Sort.Direction dir = parts.length>1 && parts[1].equalsIgnoreCase("asc")
-                ? Sort.Direction.ASC : Sort.Direction.DESC;
+        Sort.Direction dir = parts.length > 1 && parts[1].equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC;
         Sort s = Sort.by(dir, parts[0]);
-        Pageable pr = PageRequest.of(page, size, s);
+        Pageable pageable = PageRequest.of(page, size, s);
 
-        Page<Document> result = documentService.searchDocuments(
-                userName, documentName, tags, pr
+        Page<Document> resultPage = documentService.searchDocuments(userName, documentName, tags, pageable);
+
+        List<DocumentResponse> items = resultPage.getContent().stream()
+                .map(doc -> new DocumentResponse(
+                        doc.getId(),
+                        doc.getUserName(),
+                        doc.getDocumentName(),
+                        doc.getTags().stream().map(Tag::getName).collect(Collectors.toList()),
+                        doc.getFileSize(),
+                        doc.getFileType(),
+                        doc.getCreatedAt()
+                ))
+                .collect(Collectors.toList());
+
+        PaginatedDocumentSearch.Metadata meta = new PaginatedDocumentSearch.Metadata(
+                resultPage.getNumber(),
+                resultPage.getSize(),
+                resultPage.getNumberOfElements(),
+                resultPage.getTotalPages(),
+                resultPage.getTotalElements()
         );
+        PaginatedDocumentSearch dto = new PaginatedDocumentSearch(meta, items);
 
-        log.info("Result", result);
-        Page<DocumentResponse> dtoPage = result.map(doc -> {
-            Set<Tag> safeTags = new HashSet<>(doc.getTags());
-            List<String> tagNames = safeTags.stream()
-                    .map(Tag::getName)
-                    .collect(Collectors.toList());
-            return new DocumentResponse(
-                    doc.getId(),
-                    doc.getUserName(),
-                    doc.getDocumentName(),
-                    tagNames,
-                    doc.getFileSize(),
-                    doc.getFileType(),
-                    doc.getCreatedAt()
-            );
-        });
+        return ResponseEntity.ok(dto);
+    }
 
-        return ResponseEntity.ok(dtoPage);
+    @Operation(
+            summary = "Download a document",
+            parameters = {@Parameter(name = "documentId", in = ParameterIn.PATH,
+                    description = "ID of the document to download", schema = @Schema(type = "string"))},
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Download URL returned",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = DocumentDownloadDto.class))),
+                    @ApiResponse(responseCode = "404", description = "Document not found",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class))),
+                    @ApiResponse(responseCode = "500", description = "Internal Server Error",
+                            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
+            }
+    )
+    @GetMapping("/download/{documentId}")
+    public ResponseEntity<DocumentDownloadDto> downloadDocument(@PathVariable UUID documentId) {
+        String url = documentService.downloadDocument(documentId);
+        DocumentDownloadDto dto = new DocumentDownloadDto(url);
+        return ResponseEntity.ok(dto);
     }
 }
