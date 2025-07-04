@@ -157,7 +157,10 @@ Ensure that your solution includes the Dockerfile and database schema script, an
 ### Additional Comments 💬
 
 If you have any additional notes, explanations, or assumptions regarding your implementation, feel free to include them in this section. This can help provide more context to reviewers.
-
+- Un reto que no pude cumplir fue limitar el contenedor a 50 mb, lo menos que consegui bajarle fue a 200mb
+- El endpoint para la busqueda de documentos no lo termine de implementar, es la primera vez que implemento paginacion y estuve batllando con un error _java.util.ConcurrentModificationException_ 
+- Al final debido al limite de tiempo para entregarlo hoy jueves 3 julio, no realice ningun tipo de test
+- Muchas Gracias por la oportunidad de tomarme en cuenta, este reto me ayudo a darme cuenta las areas de oportunidad que tengo y eso es muy valioso para mi.
 ---
 
 **⚠️ Important Note About the Challenge Completion ⚠️**
